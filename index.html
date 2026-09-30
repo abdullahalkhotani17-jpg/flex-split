@@ -17,7 +17,9 @@ nav button{flex:1;border:0;background:none;font-size:12px;padding:10px 2px;borde
 #tm{position:fixed;left:12px;right:12px;bottom:calc(64px + env(safe-area-inset-bottom,0px));background:var(--ac);color:#fff;text-align:center;padding:12px;border-radius:12px;font-weight:700}
 .d{display:inline-flex;width:56px;justify-content:center}.d.s{background:var(--ac);color:#fff;border-color:var(--ac)}
 a{color:var(--ac)}table{border-collapse:collapse;font-size:13px;width:100%}td,th{border:1px solid var(--bd);padding:4px 6px;white-space:nowrap;text-align:left}summary{cursor:pointer}td button{min-height:32px;padding:2px 8px}.r{display:flex;justify-content:space-between;align-items:center;gap:8px}.w{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
-</style></head><body><div id="app"></div><div id="tm" hidden></div>
+</style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head><body><div id="app"></div><div id="tm" hidden></div>
 <nav id="nv"></nav>
 <script>
 const M='https://musclewiki.com/ar-sa/exercise/',Y='https://www.youtube.com/watch?v=',m=s=>M+s,y=s=>Y+s;
@@ -48,13 +50,50 @@ const lab=sl=>(sl%2?'Lower ':'Upper ')+(sl<2?1:2);
 let S=null,T='today',te=0,CF='',CP='';
 try{S=JSON.parse(localStorage.getItem(K))}catch(e){}
 const DEF=()=>({setup:0,units:'kg',exp:'beginner',days:[6,0,2,3],start:iso(new Date()),n:0,hold:'',last:'',run:0,log:{},sw:{},notes:{},inc:2.5,dates:{}});S=S||DEF();
-let DB=null,dbT=0;
-const push=()=>{if(!DB)return;clearTimeout(dbT);dbT=setTimeout(()=>{try{DB.set({json:JSON.stringify(S)}).catch(()=>{})}catch(e){}},800)};
-const save=()=>{S.ts=Date.now();try{localStorage.setItem(K,JSON.stringify(S))}catch(e){}push()};
-(async()=>{try{if(typeof claude==='undefined')return;const u=await claude.use('user'),d=await claude.use('db');if(!u||!d)return;const id=await u.id();if(!id)return;
- DB=d.collection('data/users/'+id).doc('state');const sn=await DB.get();
- if(sn.exists&&sn.data().json){const R=JSON.parse(sn.data().json);if((R.ts||0)>(S.ts||0)){S=R;try{localStorage.setItem(K,JSON.stringify(S))}catch(e){}}else push()}else if(S.setup)push();
- r()}catch(e){}})();
+
+// Supabase Setup
+const SUPABASE_URL = 'https://coowfazvgbrvyumvjyfs.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_hXvOFNYNxQERls14TkW9YA_yjoTjRaK';
+let sb = null, dbT = 0;
+
+if (window.supabase) {
+  sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+}
+
+const push = () => {
+  if (!sb) return;
+  clearTimeout(dbT);
+  dbT = setTimeout(async () => {
+    try {
+      await sb.from('user_state').upsert({ id: 1, json: JSON.stringify(S) });
+    } catch (e) {}
+  }, 800);
+};
+
+const save = () => {
+  S.ts = Date.now();
+  try { localStorage.setItem(K, JSON.stringify(S)); } catch (e) {}
+  push();
+};
+
+(async () => {
+  try {
+    if (!sb) return;
+    const { data, error } = await sb.from('user_state').select('json').eq('id', 1).maybeSingle();
+    if (data && data.json) {
+      const R = JSON.parse(data.json);
+      if ((R.ts || 0) > (S.ts || 0)) {
+        S = R;
+        try { localStorage.setItem(K, JSON.stringify(S)); } catch (e) {}
+      } else {
+        push();
+      }
+    } else if (S.setup) {
+      push();
+    }
+    r();
+  } catch (e) {}
+})();
 
 function plan(c){const t=iso(new Date());let d=S.hold&&S.hold>t?S.hold:t;if(d<S.start)d=S.start;if(S.last&&S.last>=d)d=ad(S.last,1);
  let run=S.last===ad(d,-1)?S.run:0,n=S.n,o=[],first=1;
@@ -74,9 +113,9 @@ function today(){const n=S.n,sl=n%4,k=n/4|0,pw=k%8+1,ty=sl%2?L:U,tk=sl%2?'L':'U'
   h+=`<div class=c><div class=r><b>${i+1}. ${esc(nm)}</b><a href="${a[1]}" target=_blank rel=noopener>▶ Watch</a></div>
   <div class=mu>${e[3]} · rest ${e[2]?'2–3 min':'90–120 s'} · Last time: ${last}</div>
   ${wu?'<div class=mu>Warm-up: 50%×5 · 75%×3 · 90%×1</div>':''}
-  ${[0,1].map(j=>{const s=lg.s[j]||{};return `<div class=set><span class=mu>Set ${j+1}</span><input inputmode=decimal placeholder="${S.units}" value="${s.w||''}" oninput="sv('${lk}','${esc(nm)}',${j},'w',this.value)"><input inputmode=numeric placeholder=reps value="${s.r||''}" oninput="sv('${lk}','${esc(nm)}',${j},'r',this.value)"><input inputmode=numeric placeholder=RIR value="${s.i||''}" oninput="sv('${lk}','${esc(nm)}',${j},'i',this.value)"><button class="${s.d?'dn':''}" onclick="dn('${lk}','${esc(nm)}',${j},${e[2]})">✓</button></div>`}).join('')}
-  ${hit(lg)||hit(pl)&&pl.nm===nm?`<div class=ok style="margin-top:8px">▲ Increase weight next time (+${inc()} ${S.units})</div>`:''}
-  <select style="margin-top:8px;width:100%" onchange="sw('${tk+i}',this.value)"><option value=0 ${si?'':'selected'}>${esc(e[0])}</option>${e[4].map((x,j)=>`<option value=${j+1} ${si==j+1?'selected':''}>Swap: ${esc(x[0])}</option>`).join('')}</select></div>`});
+  ${[0,1].map(j=>{const s=lg.s[j]||{};return `<div class=set><span class=mu>Set ${j+1}</span><input inputmode=decimal placeholder="${S.units}" value="${s.w\vert{}\vert{}''}" oninput="sv('${lk}','${esc(nm)}',${j},'w',this.value)"><input inputmode=numeric placeholder=reps value="${s.r\vert{}\vert{}''}" oninput="sv('${lk}','${esc(nm)}',${j},'r',this.value)"><input inputmode=numeric placeholder=RIR value="${s.i\vert{}\vert{}''}" oninput="sv('${lk}','${esc(nm)}',${j},'i',this.value)"><button class="${s.d?'dn':''}" onclick="dn('${lk}','${esc(nm)}',${j},${e[2]})">✓</button></div>`}).join('')}
+  ${hit(lg)||hit(pl)&&pl.nm===nm?`<div class=ok style="margin-top:8px">▲ Increase weight next time (+${inc()}${S.units})</div>`:''}
+  <select style="margin-top:8px;width:100%" onchange="sw('${tk+i}',this.value)"><option value=0 ${si?'':'selected'}>${esc(e[0])}</option>${e[4].map((x,j)=>`<option value=${j+1} ${si==j+1?'selected':''}>Swap:${esc(x[0])}</option>`).join('')}</select></div>`});
  return h+`<div class=c><textarea style="width:100%" rows=2 placeholder="Session note" oninput="S.notes[S.n]=this.value;save()">${esc(S.notes[n])}</textarea></div>
  <button class=p onclick=fin()>Finish session</button>`}
 
@@ -103,9 +142,9 @@ function prog(){let h='<h2>Progress</h2><p class=mu>Same session vs same session
    h+=`<div class=r style="margin-top:8px"><span>${esc(a.nm)}</span><span class=${cl}>${z&&b.nm===a.nm?z.w+'×'+z.r+' → ':''}${x.w}${S.units}×${x.r||'?'} ${ar}</span></div>`});h+='</div>'}
  return h+(any?'':'<div class=c>Log a session to see progress here.</div>')}
 
-function prg(){const k=S.n/4|0,pw=k%8+1;return `<h2>Program</h2><p class=mu>Cycle ${(k/8|0)+1} · ${S.n} sessions done. After week 8 it repeats — weeks 1–2 act as a built-in deload.</p><div class=w>${[1,2,3,4,5,6,7,8].map(w=>`<div class=c style="text-align:center;${w==pw?'border-color:var(--ac)':''}"><b>W${w}</b><div class=mu>RIR ${w<3?'2–3':'1–2'}</div></div>`).join('')}</div><div class=c><b>Progression</b><p class=mu>Keep the same weight until you hit 10 reps on both sets. Then add the smallest increment. Reps may drop after an increase — normal. If everything stalls for 2+ weeks, check sleep and food first.</p></div>`}
+function prg(){const k=S.n/4|0,pw=k%8+1;return `<h2>Program</h2><p class=mu>Cycle ${(k/8|0)+1} · ${S.n} sessions done. After week 8 it repeats — weeks 1–2 act as a built-in deload.</p><div class=w>${[1,2,3,4,5,6,7,8].map(w=>`<div class=c style="text-align:center;${w==pw?'border-color:var(--ac)':''}"><b>W${w}</b><div class=mu>RIR${w<3?'2–3':'1–2'}</div></div>`).join('')}</div><div class=c><b>Progression</b><p class=mu>Keep the same weight until you hit 10 reps on both sets. Then add the smallest increment. Reps may drop after an increase — normal. If everything stalls for 2+ weeks, check sleep and food first.</p></div>`}
 
-function cfg(first){return `<h2>${first?'Set up Flex Split':'Settings'}</h2><p class=mu>${DB?'Synced to your Claude account.':'Saved on this device only.'}</p><div class=c><b>Days you can train</b><div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">${[6,0,1,2,3,4,5].map(d=>`<button class="d ${S.days.includes(d)?'s':''}" onclick="td(${d})">${DN[d]}</button>`).join('')}</div>${S.days.length<3?'<div class=wr style="margin-top:8px">Aim for at least 3 days. 3 consistent beats 5 inconsistent.</div>':''}</div>
+function cfg(first){return `<h2>${first?'Set up Flex Split':'Settings'}</h2><p class=mu>${sb?'Synced with Supabase.':'Saved on this device only.'}</p><div class=c><b>Days you can train</b><div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">${[6,0,1,2,3,4,5].map(d=>`<button class="d ${S.days.includes(d)?'s':''}" onclick="td(${d})">${DN[d]}</button>`).join('')}</div>${S.days.length<3?'<div class=wr style="margin-top:8px">Aim for at least 3 days. 3 consistent beats 5 inconsistent.</div>':''}</div>
  <div class=c><div class=r>Units<select onchange="S.units=this.value;S.inc=this.value=='kg'?2.5:5;save();r()"><option ${S.units=='kg'?'selected':''}>kg</option><option ${S.units=='lb'?'selected':''}>lb</option></select></div>
  <div class=r style="margin-top:8px">Experience<select onchange="S.exp=this.value;save()"><option value=beginner ${S.exp=='beginner'?'selected':''}>Beginner</option><option value=advanced ${S.exp=='advanced'?'selected':''}>Advanced</option></select></div>
  <div class=r style="margin-top:8px">Start date<input type=date value="${S.start}" onchange="S.start=this.value;save()"></div>
@@ -115,7 +154,7 @@ function td(d){const i=S.days.indexOf(d);i<0?S.days.push(d):S.days.splice(i,1);s
 const rows=()=>Object.keys(S.log).map(k=>{const[a,b,i]=k.split('|').map(Number);return{k:a,sl:b,i,e:S.log[k]}}).filter(x=>x.e.s.some(s=>s.w)).sort((p,q)=>p.k-q.k||p.sl-q.sl||p.i-q.i);
 const fmt=s=>s&&s.w?s.w+'×'+(s.r||'?')+(s.i?' @'+s.i:''):'';
 function hist(){const R=rows();if(!R.length)return '';const cy={};R.forEach(x=>(cy[x.k/8|0]=cy[x.k/8|0]||[]).push(x));const ks=Object.keys(cy);
- return '<h2 style="margin-top:20px">History</h2><p class=mu>Every cycle is kept here. Nothing is deleted.</p>'+ks.map(c=>`<details class=c ${c==ks[ks.length-1]?'open':''}><summary><b>Cycle ${+c+1}</b> <span class=mu>${cy[c].length} exercises logged</span></summary><div style="overflow-x:auto;margin-top:8px"><table><tr><th>Wk</th><th>Session</th><th>Exercise</th><th>Set 1</th><th>Set 2</th><th></th></tr>${cy[c].map(x=>`<tr><td>${x.k%8+1}</td><td>${lab(x.sl)}</td><td>${esc(x.e.nm)}</td><td>${fmt(x.e.s[0])}</td><td>${fmt(x.e.s[1])}</td><td><button onclick="del('${x.k}|${x.sl}|${x.i}')">${CF===x.k+'|'+x.sl+'|'+x.i?'Sure?':'✕'}</button></td></tr>`).join('')}</table></div><button style="width:100%;margin-top:8px" onclick="cp(${c})">Copy cycle ${+c+1} for Sheets</button></details>`).join('')}
+ return '<h2 style="margin-top:20px">History</h2><p class=mu>Every cycle is kept here. Nothing is deleted.</p>'+ks.map(c=>`<details class=c ${c==ks[ks.length-1]?'open':''}><summary><b>Cycle ${+c+1}</b> <span class=mu>${cy[c].length} exercises logged</span></summary><div style="overflow-x:auto;margin-top:8px"><table><tr><th>Wk</th><th>Session</th><th>Exercise</th><th>Set 1</th><th>Set 2</th><th></th></tr>${cy[c].map(x=>`<tr><td>${x.k%8+1}</td><td>${lab(x.sl)}</td><td>${esc(x.e.nm)}</td><td>${fmt(x.e.s[0])}</td><td>${fmt(x.e.s[1])}</td><td><button onclick="del('${x.k}\vert{}${x.sl}|${x.i}')">${CF===x.k+'|'+x.sl+'|'+x.i?'Sure?':'✕'}</button></td></tr>`).join('')}</table></div><button style="width:100%;margin-top:8px" onclick="cp(${c})">Copy cycle ${+c+1} for Sheets</button></details>`).join('')}
 function cp(c){let o='Cycle\tWeek\tSession\tExercise\tSet 1\tSet 2\n';rows().forEach(x=>{if(c>=0&&(x.k/8|0)!=c)return;o+=[(x.k/8|0)+1,x.k%8+1,lab(x.sl),x.e.nm,fmt(x.e.s[0]),fmt(x.e.s[1])].join('\t')+'\n'});
  const f=()=>{CP=o;r();scrollTo(0,0)};try{navigator.clipboard.writeText(o).then(()=>toast('Copied. Paste into Google Sheets or Excel.'),f)}catch(e){f()}}
 let CM=['',''];
