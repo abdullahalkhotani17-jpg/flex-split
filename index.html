@@ -19,6 +19,7 @@ nav button{flex:1;border:0;background:none;font-size:12px;padding:10px 2px;borde
 a{color:var(--ac)}table{border-collapse:collapse;font-size:13px;width:100%}td,th{border:1px solid var(--bd);padding:4px 6px;white-space:nowrap;text-align:left}summary{cursor:pointer}td button{min-height:32px;padding:2px 8px}.r{display:flex;justify-content:space-between;align-items:center;gap:8px}.w{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
 </style></head><body><div id="app"></div><div id="tm" hidden></div>
 <nav id="nv"></nav>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 const M='https://musclewiki.com/ar-sa/exercise/',Y='https://www.youtube.com/watch?v=',m=s=>M+s,y=s=>Y+s;
 // [name, video, compound, muscle, [alternatives]]
@@ -45,30 +46,77 @@ const iso=d=>new Date(d.getTime()-d.getTimezoneOffset()*6e4).toISOString().slice
 const ad=(s,k)=>{const d=new Date(s+'T12:00:00');d.setDate(d.getDate()+k);return iso(d)},wd=s=>new Date(s+'T12:00:00').getDay();
 const esc=s=>String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const lab=sl=>(sl%2?'Lower ':'Upper ')+(sl<2?1:2);
-let S=null,T='today',te=0,CF='',CP='';
-try{S=JSON.parse(localStorage.getItem(K))}catch(e){}
-const DEF=()=>({setup:0,units:'kg',exp:'beginner',days:[6,0,2,3],start:iso(new Date()),n:0,hold:'',last:'',run:0,log:{},sw:{},notes:{},inc:2.5,dates:{}});S=S||DEF();
+const DEF=()=>({setup:0,units:'kg',exp:'beginner',days:[6,0,2,3],start:iso(new Date()),n:0,hold:'',last:'',run:0,log:{},sw:{},notes:{},inc:2.5,dates:{}});
+let S=DEF(),T='today',te=0,CF='',CP='';
 
 const SUPABASE_URL='https://coowfazvgbrvyumvjyfs.supabase.co';
 const SUPABASE_KEY='sb_publishable_hXvOFNYNxQERls14TkW9YA_yjoTjRaK';
 const SB_TABLE='flexsplit_state';
-const SB_ROW_ID='default';
-let dbT=0,SB_OK=0;
+const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+let USER=null,AUTH_READY=0,AUTH_MSG='',dbT=0,SB_OK=0;
+const userKey=()=>USER?K+'_'+USER.id:K+'_signedout';
 
+function loadLocal(){
+ S=DEF();
+ try{const x=localStorage.getItem(userKey());if(x)S=JSON.parse(x)}catch(e){}
+}
 async function sbGet(){
- const res=await fetch(`${SUPABASE_URL}/rest/v1/${SB_TABLE}?id=eq.${encodeURIComponent(SB_ROW_ID)}&select=id,json,updated_at&limit=1`,{headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}`}});
- if(!res.ok)throw new Error('Supabase read failed: '+res.status);
- const rows=await res.json();return rows[0]||null;
+ if(!USER)return null;
+ const {data,error}=await sb.from(SB_TABLE).select('id,json,updated_at').eq('id',USER.id).maybeSingle();
+ if(error)throw error;
+ return data;
 }
 async function sbSet(){
- const body={id:SB_ROW_ID,json:JSON.stringify(S),updated_at:new Date().toISOString()};
- const res=await fetch(`${SUPABASE_URL}/rest/v1/${SB_TABLE}`,{method:'POST',headers:{apikey:SUPABASE_KEY,Authorization:`Bearer ${SUPABASE_KEY}`,'Content-Type':'application/json',Prefer:'resolution=merge-duplicates,return=minimal'},body:JSON.stringify(body)});
- if(!res.ok)throw new Error('Supabase write failed: '+res.status);
+ if(!USER)return;
+ const {error}=await sb.from(SB_TABLE).upsert({id:USER.id,json:JSON.stringify(S),updated_at:new Date().toISOString()},{onConflict:'id'});
+ if(error)throw error;
  SB_OK=1;
 }
-const push=()=>{clearTimeout(dbT);dbT=setTimeout(()=>sbSet().catch(()=>{SB_OK=0}),800)};
-const save=()=>{S.ts=Date.now();try{localStorage.setItem(K,JSON.stringify(S))}catch(e){}push()};
-(async()=>{try{const row=await sbGet();SB_OK=1;if(row&&row.json){const R=JSON.parse(row.json);if((R.ts||0)>(S.ts||0)){S=R;try{localStorage.setItem(K,JSON.stringify(S))}catch(e){}}else if(S.setup)push()}else if(S.setup)push();r()}catch(e){SB_OK=0;r()}})();
+const push=()=>{if(!USER)return;clearTimeout(dbT);dbT=setTimeout(()=>sbSet().catch(()=>{SB_OK=0;r()}),800)};
+const save=()=>{S.ts=Date.now();try{localStorage.setItem(userKey(),JSON.stringify(S))}catch(e){}push()};
+
+async function loadUserData(){
+ if(!USER)return;
+ loadLocal();SB_OK=0;
+ try{
+  const row=await sbGet();SB_OK=1;
+  if(row&&row.json){
+   const R=JSON.parse(row.json);
+   if((R.ts||0)>=(S.ts||0)){S=R;try{localStorage.setItem(userKey(),JSON.stringify(S))}catch(e){}}
+   else if(S.setup)push();
+  }else if(S.setup)push();
+ }catch(e){SB_OK=0}
+}
+async function authInit(){
+ const {data}=await sb.auth.getSession();
+ USER=data.session?.user||null;
+ if(USER)await loadUserData();
+ AUTH_READY=1;r();
+ sb.auth.onAuthStateChange(async(_event,session)=>{
+  const old=USER?.id||'';USER=session?.user||null;
+  if(USER&&USER.id!==old)await loadUserData();
+  if(!USER){S=DEF();SB_OK=0;T='today'}
+  AUTH_READY=1;r();
+ });
+}
+async function signIn(){
+ const email=($('ae')?.value||'').trim(),password=$('ap')?.value||'';
+ AUTH_MSG='';if(!email||!password){AUTH_MSG='Enter email and password.';r();return}
+ const {error}=await sb.auth.signInWithPassword({email,password});
+ AUTH_MSG=error?error.message:'';if(error)r();
+}
+async function signUp(){
+ const email=($('ae')?.value||'').trim(),password=$('ap')?.value||'';
+ AUTH_MSG='';if(!email||password.length<6){AUTH_MSG='Enter an email and a password of at least 6 characters.';r();return}
+ const {data,error}=await sb.auth.signUp({email,password,options:{emailRedirectTo:location.origin+location.pathname}});
+ if(error)AUTH_MSG=error.message;
+ else if(!data.session)AUTH_MSG='Account created. Check your email to confirm it, then sign in.';
+ else AUTH_MSG='Account created.';
+ r();
+}
+async function signOut(){await sb.auth.signOut();}
+function authView(){return `<h2>Flex Split</h2><p class=mu>Sign in to keep your workout data private and synced across your devices.</p><div class=c><input id=ae type=email autocomplete=email placeholder="Email" style="width:100%;margin-bottom:8px"><input id=ap type=password autocomplete=current-password placeholder="Password" style="width:100%;margin-bottom:8px"><button class=p onclick="signIn()">Sign in</button><button style="width:100%;margin-top:8px" onclick="signUp()">Create account</button>${AUTH_MSG?`<div class="${AUTH_MSG.startsWith('Account')?'ok':'wr'}" style="margin-top:10px">${esc(AUTH_MSG)}</div>`:''}</div>`}
+authInit();
 
 function plan(c){const t=iso(new Date());let d=S.hold&&S.hold>t?S.hold:t;if(d<S.start)d=S.start;if(S.last&&S.last>=d)d=ad(S.last,1);
  let run=S.last===ad(d,-1)?S.run:0,n=S.n,o=[],first=1;
@@ -119,12 +167,12 @@ function prog(){let h='<h2>Progress</h2><p class=mu>Same session vs same session
 
 function prg(){const k=S.n/4|0,pw=k%8+1;return `<h2>Program</h2><p class=mu>Cycle ${(k/8|0)+1} · ${S.n} sessions done. After week 8 it repeats — weeks 1–2 act as a built-in deload.</p><div class=w>${[1,2,3,4,5,6,7,8].map(w=>`<div class=c style="text-align:center;${w==pw?'border-color:var(--ac)':''}"><b>W${w}</b><div class=mu>RIR ${w<3?'2–3':'1–2'}</div></div>`).join('')}</div><div class=c><b>Progression</b><p class=mu>Keep the same weight until you hit 10 reps on both sets. Then add the smallest increment. Reps may drop after an increase — normal. If everything stalls for 2+ weeks, check sleep and food first.</p></div>`}
 
-function cfg(first){return `<h2>${first?'Set up Flex Split':'Settings'}</h2><p class=mu>${SB_OK?'Synced with Supabase.':'Saved on this device; Supabase sync unavailable.'}</p><div class=c><b>Days you can train</b><div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">${[6,0,1,2,3,4,5].map(d=>`<button class="d ${S.days.includes(d)?'s':''}" onclick="td(${d})">${DN[d]}</button>`).join('')}</div>${S.days.length<3?'<div class=wr style="margin-top:8px">Aim for at least 3 days. 3 consistent beats 5 inconsistent.</div>':''}</div>
+function cfg(first){return `<h2>${first?'Set up Flex Split':'Settings'}</h2><p class=mu>${SB_OK?'Synced with Supabase.':'Saved on this device; Supabase sync unavailable.'}${USER?' · '+esc(USER.email):''}</p><div class=c><b>Days you can train</b><div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">${[6,0,1,2,3,4,5].map(d=>`<button class="d ${S.days.includes(d)?'s':''}" onclick="td(${d})">${DN[d]}</button>`).join('')}</div>${S.days.length<3?'<div class=wr style="margin-top:8px">Aim for at least 3 days. 3 consistent beats 5 inconsistent.</div>':''}</div>
  <div class=c><div class=r>Units<select onchange="S.units=this.value;S.inc=this.value=='kg'?2.5:5;save();r()"><option ${S.units=='kg'?'selected':''}>kg</option><option ${S.units=='lb'?'selected':''}>lb</option></select></div>
  <div class=r style="margin-top:8px">Experience<select onchange="S.exp=this.value;save()"><option value=beginner ${S.exp=='beginner'?'selected':''}>Beginner</option><option value=advanced ${S.exp=='advanced'?'selected':''}>Advanced</option></select></div>
  <div class=r style="margin-top:8px">Start date<input type=date value="${S.start}" onchange="S.start=this.value;save()"></div>
  <div class=r style="margin-top:8px">Weight step<input type=number step=.5 style="width:90px" value="${inc()}" onchange="S.inc=+this.value;save()"></div></div>
- ${first?'<button class=p onclick="S.setup=1;save();r()">Start</button>':'<button style="width:100%" onclick="cp(-1)">Copy all data for Sheets</button><button style="width:100%;margin-top:8px" onclick="rst()">'+(CF==='rst'?'Tap again to delete everything':'Reset data')+'</button>'}`}
+ ${first?'<button class=p onclick="S.setup=1;save();r()">Start</button>':'<button style="width:100%" onclick="cp(-1)">Copy all data for Sheets</button><button style="width:100%;margin-top:8px" onclick="rst()">'+(CF==='rst'?'Tap again to delete everything':'Reset data')+'</button><button style="width:100%;margin-top:8px" onclick="signOut()">Sign out</button>'}`}
 function td(d){const i=S.days.indexOf(d);i<0?S.days.push(d):S.days.splice(i,1);save();r()}
 const rows=()=>Object.keys(S.log).map(k=>{const[a,b,i]=k.split('|').map(Number);return{k:a,sl:b,i,e:S.log[k]}}).filter(x=>x.e.s.some(s=>s.w)).sort((p,q)=>p.k-q.k||p.sl-q.sl||p.i-q.i);
 const fmt=s=>s&&s.w?s.w+'×'+(s.r||'?')+(s.i?' @'+s.i:''):'';
@@ -141,9 +189,9 @@ function cmp(){const Q=[...new Set(rows().map(x=>x.k+'|'+x.sl))];if(Q.length<2)r
  const A=g(CM[0]),B=g(CM[1]),ns=[...new Set([...Object.keys(A),...Object.keys(B)])],f=z=>z?z.w+'×'+(z.r||'?'):'—';
  return `<h2>Compare</h2><div class=c><div class=r>A<select onchange="CM[0]=this.value;r()">${op(CM[0])}</select></div><div class=r style="margin-top:8px">B<select onchange="CM[1]=this.value;r()">${op(CM[1])}</select></div></div><div class=c style="overflow-x:auto"><table><tr><th>Exercise</th><th>A</th><th>B</th><th></th></tr>${ns.map(n=>{const a=A[n],b=B[n];let d='';if(a&&b){const u=b.w>a.w||(b.w==a.w&&b.r>a.r);d=b.w==a.w&&b.r==a.r?'▬':u?'<span class=ok>▲</span>':'<span class=bad>▼</span>'}return `<tr><td>${esc(n)}</td><td>${f(a)}</td><td>${f(b)}</td><td>${d}</td></tr>`}).join('')}</table></div><p class=mu>Best set per exercise. ▲ means B is better than A.</p>`}
 function del(k){if(CF!==k){CF=k;r();return}delete S.log[k];CF='';save();r()}
-function rst(){if(CF!=='rst'){CF='rst';r();return}try{localStorage.removeItem(K)}catch(e){}S=DEF();save();T='today';CF='';r()}
+function rst(){if(CF!=='rst'){CF='rst';r();return}try{localStorage.removeItem(userKey())}catch(e){}S=DEF();save();T='today';CF='';r()}
 function toast(t){const e=document.createElement('div');e.className='c';e.style.cssText='position:fixed;left:12px;right:12px;top:calc(12px + env(safe-area-inset-top,0px));text-align:center;z-index:9';e.textContent=t;document.body.appendChild(e);setTimeout(()=>e.remove(),2500)}
-function r(){const tabs=[['today','Today'],['week','Week'],['prog','Progress'],['cmp','Compare'],['prg','Program'],['cfg','Settings']];
+function r(){if(!AUTH_READY){$('nv').innerHTML='';$('app').innerHTML='<div class=c>Loading…</div>';return}if(!USER){$('nv').innerHTML='';$('app').innerHTML=authView();return}const tabs=[['today','Today'],['week','Week'],['prog','Progress'],['cmp','Compare'],['prg','Program'],['cfg','Settings']];
  $('nv').innerHTML=S.setup?tabs.map(t=>`<button class="${T==t[0]?'on':''}" onclick="T='${t[0]}';CF='';r();scrollTo(0,0)">${t[1]}</button>`).join(''):'';
  $('app').innerHTML=(CP?`<div class=c><b>Select all, then copy</b><textarea rows=8 style="width:100%" readonly onfocus="this.select()">${esc(CP)}</textarea><button onclick="CP='';r()">Close</button></div>`:'')+(!S.setup?cfg(1):{today,week,prog,cmp,prg:()=>prg()+hist(),cfg}[T]())}
 $('tm').onclick=()=>{te=0};
